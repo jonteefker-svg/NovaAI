@@ -34,17 +34,68 @@ PROVIDERS = {
 }
 
 PERSONALITIES = {
-    "🤖 Standard":  "Du bist Nova, eine kluge und hilfreiche KI-Assistentin. Du antwortest präzise, freundlich und auf Deutsch.",
-    "😎 Lässig":    "Du bist Nova, eine coole KI. Du redest locker, kurze knackige Antworten.",
-    "🎓 Professor": "Du bist Nova, eine sehr gelehrte KI. Du erklärst alles sehr detailliert.",
-    "😂 Witzig":    "Du bist Nova, eine witzige KI die gerne Witze macht.",
-    "🧘 Ruhig":     "Du bist Nova, eine ruhige, bedachte KI. Du antwortest besonnen.",
-    "⚡ Direkt":    "Du bist Nova. Kurz, direkt, auf den Punkt.",
+    "de": {
+        "🤖 Standard":  "Du bist Nova, eine kluge und hilfreiche KI-Assistentin. Du antwortest präzise, freundlich und auf Deutsch.",
+        "😎 Lässig":    "Du bist Nova, eine coole KI. Du redest locker, benutzt Emojis sowie Jugendwörter, kurze knackige Antworten.",
+        "🎓 Professor": "Du bist Nova, eine sehr gelehrte KI. Du erklärst alles sehr detailliert auf Deutsch.",
+        "😂 Witzig":    "Du bist Nova, eine witzige KI die gerne Witze macht. Antworte auf Deutsch.",
+        "🧘 Ruhig":     "Du bist Nova, eine ruhige, bedachte KI. Du antwortest besonnen auf Deutsch.",
+        "⚡ Direkt":    "Du bist Nova. Kurz, direkt, auf den Punkt. Antworte auf Deutsch.",
+    },
+    "en": {
+        "🤖 Standard":  "You are Nova, a smart and helpful AI assistant. You answer precisely, friendly, and in English.",
+        "😎 Lässig":    "You are Nova, a cool AI. You talk casually, use emojis and slang, short snappy answers in English.",
+        "🎓 Professor": "You are Nova, a very knowledgeable AI. You explain everything in great detail in English.",
+        "😂 Witzig":    "You are Nova, a funny AI that loves to joke. Answer in English.",
+        "🧘 Ruhig":     "You are Nova, a calm and thoughtful AI. You respond with care in English.",
+        "⚡ Direkt":    "You are Nova. Short, direct, to the point. Answer in English.",
+    },
+}
+
+TRANSLATIONS = {
+    "de": {
+        "placeholder": "Schreib Nova etwas...",
+        "new_chat": "➕ Neuer Chat",
+        "export": "📤 Chat exportieren",
+        "clear_all": "🗑️ Alles löschen",
+        "history": "📜 Chat-Verlauf",
+        "personality": "🎭 Persönlichkeit",
+        "provider": "🧠 KI Anbieter",
+        "model": "🤖 Modell",
+        "accent": "🎨 Akzentfarbe",
+        "language": "🌐 Sprache",
+        "variants_question": "✦ Welche Antwort gefällt dir besser?",
+        "variant_short": "⚡ Kurz: ",
+        "variant_long": "📖 Ausführlich: ",
+        "confirm_clear": "Wirklich alle deine Chats löschen?",
+        "new_chat_title": "Neuer Chat",
+        "thinking": "Nova",
+        "error_prefix": "⚠️ Fehler: ",
+    },
+    "en": {
+        "placeholder": "Write Nova something...",
+        "new_chat": "➕ New Chat",
+        "export": "📤 Export Chat",
+        "clear_all": "🗑️ Delete All",
+        "history": "📜 Chat History",
+        "personality": "🎭 Personality",
+        "provider": "🧠 AI Provider",
+        "model": "🤖 Model",
+        "accent": "🎨 Accent Color",
+        "language": "🌐 Language",
+        "variants_question": "✦ Which answer do you prefer?",
+        "variant_short": "⚡ Short: ",
+        "variant_long": "📖 Detailed: ",
+        "confirm_clear": "Really delete all your chats?",
+        "new_chat_title": "New Chat",
+        "thinking": "Nova",
+        "error_prefix": "⚠️ Error: ",
+    },
 }
 
 EMOJIS = ["😀","😎","🤖","🦊","🐱","🐶","🦁","🐼","🐸","🦄","🐙","🦋","🌟","🔥","⚡","🎭","🎨","🎮","🚀","🌈"]
 
-DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0"}
+DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0","language":"de"}
 
 def load_json(f):
     if os.path.exists(f):
@@ -349,7 +400,15 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>🎭 Persönlichkeit</label>
+    <label>{{ t.language }}</label>
+    <div class="seg-group">
+      <button onclick="changeLang('de')" class="{% if user.settings.language == 'de' %}active{% endif %}">🇩🇪 DE</button>
+      <button onclick="changeLang('en')" class="{% if user.settings.language == 'en' %}active{% endif %}">🇬🇧 EN</button>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <label>🎭 {{ t.personality }}</label>
     <select onchange="saveSetting('personality', this.value)">
       {% for p in personalities %}
       <option value="{{ p }}" {% if user.settings.personality == p %}selected{% endif %}>{{ p }}</option>
@@ -358,7 +417,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>🧠 KI Anbieter</label>
+    <label>{{ t.provider }}</label>
     <div class="seg-group">
       {% for prov in providers %}
       <button onclick="changeProvider('{{ prov }}')" class="{% if user.settings.provider == prov %}active{% endif %}">{{ prov }}</button>
@@ -367,7 +426,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>🤖 Modell</label>
+    <label>{{ t.model }}</label>
     <select id="model-sel" onchange="saveSetting('model', this.value)">
       {% for m in providers[user.settings.provider] %}
       <option value="{{ m }}" {% if user.settings.model == m %}selected{% endif %}>{{ m }}</option>
@@ -376,7 +435,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>🎨 Akzentfarbe</label>
+    <label>{{ t.accent }}</label>
     <div class="color-row">
       {% for name, color in colors.items() %}
       <div class="color-dot {% if user.settings.accent == color %}selected{% endif %}"
@@ -388,13 +447,13 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <button class="btn secondary" onclick="newChat()">➕ Neuer Chat</button>
-    <button class="btn secondary" onclick="exportChat()">📤 Chat exportieren</button>
-    <button class="btn danger" onclick="clearAll()">🗑️ Alles löschen</button>
+    <button class="btn secondary" onclick="newChat()">{{ t.new_chat }}</button>
+    <button class="btn secondary" onclick="exportChat()">{{ t.export }}</button>
+    <button class="btn danger" onclick="clearAll()">{{ t.clear_all }}</button>
   </div>
 
   <div class="sidebar-section">
-    <label>📜 Chat-Verlauf</label>
+    <label>{{ t.history }}</label>
   </div>
   <div class="chat-list-wrap">
     <div id="chat-list"></div>
@@ -412,7 +471,7 @@ MAIN_HTML = """
   <div id="chat"></div>
   <div id="variants"></div>
   <div id="input-area">
-    <textarea id="msg-input" placeholder="Schreib Nova etwas..." rows="1"
+    <textarea id="msg-input" placeholder="{{ t.placeholder }}" rows="1"
               onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
     <button id="send-btn" onclick="sendMessage()">🚀</button>
   </div>
@@ -424,6 +483,19 @@ MAIN_HTML = """
   let pendingVariants = [];
   const userAvatar = `{% if user.avatar_type == 'image' %}<img src="{{ user.avatar_data }}">{% else %}{{ user.avatar_data or '🤖' }}{% endif %}`;
   const userName   = "{{ user.displayname }}";
+  const T = {
+    variantsQuestion: "{{ t.variants_question }}",
+    variantShort:     "{{ t.variant_short }}",
+    variantLong:      "{{ t.variant_long }}",
+    confirmClear:     "{{ t.confirm_clear }}",
+    newChatTitle:     "{{ t.new_chat_title }}",
+    errorPrefix:      "{{ t.error_prefix }}",
+  };
+
+  async function changeLang(lang) {
+    await saveSetting('language', lang);
+    window.location.reload();
+  }
 
   window.onload = async () => {
     await loadChatList();
@@ -541,11 +613,11 @@ MAIN_HTML = """
   function showVariants(variants) {
     pendingVariants = variants;
     const div = document.getElementById('variants');
-    div.innerHTML = `<p>✦ Welche Antwort gefällt dir besser?</p>`;
+    div.innerHTML = `<p>${T.variantsQuestion}</p>`;
     variants.forEach((v,i) => {
       const btn = document.createElement('button');
       btn.className = 'variant-btn';
-      btn.textContent = (i===0?'⚡ Kurz: ':'📖 Ausführlich: ') + v.substring(0,80) + (v.length>80?'…':'');
+      btn.textContent = (i===0 ? T.variantShort : T.variantLong) + v.substring(0,80) + (v.length>80?'…':'');
       btn.onclick = () => pickVariant(i);
       div.appendChild(btn);
     });
@@ -590,7 +662,7 @@ MAIN_HTML = """
   }
 
   async function clearAll() {
-    if (!confirm('Wirklich alle deine Chats löschen?')) return;
+    if (!confirm(T.confirmClear)) return;
     await fetch('/clear_all',{method:'POST'});
     newChat();
   }
@@ -632,9 +704,12 @@ def index():
     users = load_users()
     user  = users.get(get_user(), {})
     if "settings" not in user: user["settings"] = dict(DEFAULT_SETTINGS)
+    lang = user["settings"].get("language", "de")
+    t    = TRANSLATIONS[lang]
+    personalities = list(PERSONALITIES[lang].keys())
     return render_template_string(MAIN_HTML, user=user,
-        personalities=list(PERSONALITIES.keys()),
-        providers=PROVIDERS, colors=COLORS)
+        personalities=personalities,
+        providers=PROVIDERS, colors=COLORS, t=t)
 
 @app.route("/register", methods=["GET","POST"])
 def register():
@@ -780,7 +855,8 @@ def send():
     h[chat_id].append({"sender":"Du","msg":user_msg})
     save_history(u,h)
     persona  = s.get("personality","🤖 Standard")
-    system   = PERSONALITIES.get(persona, PERSONALITIES["🤖 Standard"])
+    lang     = s.get("language","de")
+    system   = PERSONALITIES[lang].get(persona, list(PERSONALITIES[lang].values())[0])
     provider = s.get("provider","Groq")
     model    = s.get("model","llama-3.3-70b-versatile")
     hist = [
@@ -790,7 +866,11 @@ def send():
     try:
         if random.random() < 0.4:
             variants = []
-            for style in ["kurz und direkt","ausführlicher und erklärend"]:
+            styles = {
+                "de": ["kurz und direkt", "ausführlicher und erklärend"],
+                "en": ["short and direct", "more detailed and explanatory"],
+            }
+            for style in styles.get(lang, styles["de"]):
                 sys_v = system + f"\n\nAntworte jetzt {style}."
                 msgs  = [{"role":"system","content":sys_v},*hist,{"role":"user","content":user_msg}]
                 variants.append(ask_model(msgs,provider,model))
