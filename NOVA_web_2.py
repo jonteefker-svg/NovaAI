@@ -1,61 +1,31 @@
 # ==============================================================================
-# NOVA AI - Web Version 2.0 (Login + Profile + getrennte Chats + SQLite)
+# NOVA AI - Web Version 2.0 (Login + Profile + getrennte Chats)
 # ==============================================================================
 
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
-import json, os, datetime, platform, random, requests, uuid, hashlib, base64, sqlite3
+import json, os, datetime, platform, random, requests, uuid, hashlib, base64
 
 # ------------------------------------------------------------------------------
 # !! API KEYS HIER EINTRAGEN !!
 # ------------------------------------------------------------------------------
-GROQ_API_KEY   = "dein-groq-key-hier"
-OPENAI_API_KEY = "dein-openai-key-hier"
+GROQ_API_KEY   = "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"
+OPENAI_API_KEY = "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"
 # ------------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "nova-super-secret-2024-xK9mP3")
+app.secret_key = "nova-super-secret-2024"
 
-# Datenbank-Pfad – auf Railway unter /data, lokal im Home-Verzeichnis
-def get_db_path():
-    if os.path.exists("/data"):
-        return "/data/nova.db"
+def get_data_dir():
     if platform.system() == "Darwin":
         d = os.path.expanduser("~/Library/Application Support/NOVA_AI")
     else:
         d = os.path.join(os.path.expanduser("~"), ".nova_ai")
     os.makedirs(d, exist_ok=True)
-    return os.path.join(d, "nova.db")
+    return d
 
-DB_PATH = get_db_path()
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                password TEXT NOT NULL,
-                displayname TEXT NOT NULL,
-                avatar_type TEXT DEFAULT 'emoji',
-                avatar_data TEXT DEFAULT '🤖',
-                settings TEXT DEFAULT '{}'
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chats (
-                id TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                messages TEXT DEFAULT '[]',
-                created_at TEXT NOT NULL
-            )
-        """)
-        conn.commit()
-
-init_db()
+BASE_DIR      = get_data_dir()
+USERS_FILE    = os.path.join(BASE_DIR, "nova_users.json")
+SETTINGS_FILE = os.path.join(BASE_DIR, "nova_web_settings.json")
 
 PROVIDERS = {
     "Groq":   ["llama-3.3-70b-versatile","llama-3.1-8b-instant","mixtral-8x7b-32768","gemma2-9b-it"],
@@ -64,133 +34,49 @@ PROVIDERS = {
 }
 
 PERSONALITIES = {
-    "de": {
-        "🤖 Standard":  "Du bist Nova, eine kluge und hilfreiche KI-Assistentin. Du antwortest präzise, freundlich und auf Deutsch.",
-        "😎 Lässig":    "Du bist Nova, eine coole KI. Du redest locker, benutzt Emojis sowie Jugendwörter, kurze knackige Antworten.",
-        "🎓 Professor": "Du bist Nova, eine sehr gelehrte KI. Du erklärst alles sehr detailliert auf Deutsch.",
-        "😂 Witzig":    "Du bist Nova, eine witzige KI die gerne Witze macht. Antworte auf Deutsch.",
-        "🧘 Ruhig":     "Du bist Nova, eine ruhige, bedachte KI. Du antwortest besonnen auf Deutsch.",
-        "⚡ Direkt":    "Du bist Nova. Kurz, direkt, auf den Punkt. Antworte auf Deutsch.",
-    },
-    "en": {
-        "🤖 Standard":  "You are Nova, a smart and helpful AI assistant. You answer precisely, friendly, and in English.",
-        "😎 Lässig":    "You are Nova, a cool AI. You talk casually, use emojis and slang, short snappy answers in English.",
-        "🎓 Professor": "You are Nova, a very knowledgeable AI. You explain everything in great detail in English.",
-        "😂 Witzig":    "You are Nova, a funny AI that loves to joke. Answer in English.",
-        "🧘 Ruhig":     "You are Nova, a calm and thoughtful AI. You respond with care in English.",
-        "⚡ Direkt":    "You are Nova. Short, direct, to the point. Answer in English.",
-    },
-}
-
-TRANSLATIONS = {
-    "de": {
-        "placeholder": "Schreib Nova etwas...",
-        "new_chat": "➕ Neuer Chat",
-        "export": "📤 Chat exportieren",
-        "clear_all": "🗑️ Alles löschen",
-        "history": "📜 Chat-Verlauf",
-        "personality": "🎭 Persönlichkeit",
-        "provider": "🧠 KI Anbieter",
-        "model": "🤖 Modell",
-        "accent": "🎨 Akzentfarbe",
-        "language": "🌐 Sprache",
-        "variants_question": "✦ Welche Antwort gefällt dir besser?",
-        "variant_short": "⚡ Kurz: ",
-        "variant_long": "📖 Ausführlich: ",
-        "confirm_clear": "Wirklich alle deine Chats löschen?",
-        "new_chat_title": "Neuer Chat",
-        "thinking": "Nova",
-        "error_prefix": "⚠️ Fehler: ",
-    },
-    "en": {
-        "placeholder": "Write Nova something...",
-        "new_chat": "➕ New Chat",
-        "export": "📤 Export Chat",
-        "clear_all": "🗑️ Delete All",
-        "history": "📜 Chat History",
-        "personality": "🎭 Personality",
-        "provider": "🧠 AI Provider",
-        "model": "🤖 Model",
-        "accent": "🎨 Accent Color",
-        "language": "🌐 Language",
-        "variants_question": "✦ Which answer do you prefer?",
-        "variant_short": "⚡ Short: ",
-        "variant_long": "📖 Detailed: ",
-        "confirm_clear": "Really delete all your chats?",
-        "new_chat_title": "New Chat",
-        "thinking": "Nova",
-        "error_prefix": "⚠️ Error: ",
-    },
+    "🤖 Standard":  "Du bist Nova, eine kluge und hilfreiche KI-Assistentin. Du antwortest präzise, freundlich und auf Deutsch.",
+    "😎 Lässig":    "Du bist Nova, eine coole KI. Du redest locker,und benutzt emojis sowie jugendwörter kurze knackige Antworten.",
+    "🎓 Professor": "Du bist Nova, eine sehr gelehrte KI. Du erklärst alles sehr detailliert.",
+    "😂 Witzig":    "Du bist Nova, eine witzige KI die gerne Witze macht.",
+    "🧘 Ruhig":     "Du bist Nova, eine ruhige, bedachte KI. Du antwortest besonnen.",
+    "⚡ Direkt":    "Du bist Nova. Kurz, direkt, auf den Punkt.",
 }
 
 EMOJIS = ["😀","😎","🤖","🦊","🐱","🐶","🦁","🐼","🐸","🦄","🐙","🦋","🌟","🔥","⚡","🎭","🎨","🎮","🚀","🌈"]
 
-DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0","language":"de"}
+‚DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0"}
+
+def load_json(f):
+    if os.path.exists(f):
+        try:
+            with open(f,"r",encoding="utf-8") as file: return json.load(file)
+        except: pass
+    return {}
+
+def save_json(data, f):
+    with open(f,"w",encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
 
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def load_user(username):
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-        if not row: return None
-        u = dict(row)
-        u["settings"] = json.loads(u["settings"] or "{}")
-        if not u["settings"]: u["settings"] = dict(DEFAULT_SETTINGS)
-        return u
+def load_users():
+    return load_json(USERS_FILE)
 
-def save_user(u):
-    s = json.dumps(u.get("settings", {}), ensure_ascii=False)
-    with get_db() as conn:
-        conn.execute("""
-            INSERT INTO users (username, password, displayname, avatar_type, avatar_data, settings)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(username) DO UPDATE SET
-                password=excluded.password,
-                displayname=excluded.displayname,
-                avatar_type=excluded.avatar_type,
-                avatar_data=excluded.avatar_data,
-                settings=excluded.settings
-        """, (u["username"], u["password"], u["displayname"], u["avatar_type"], u["avatar_data"], s))
-        conn.commit()
-
-def username_exists(username):
-    with get_db() as conn:
-        return conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone() is not None
+def save_users(u):
+    save_json(u, USERS_FILE)
 
 def get_user():
     return session.get("username")
 
+def user_history_file(username):
+    return os.path.join(BASE_DIR, f"nova_history_{username}.json")
+
 def load_history(username):
-    with get_db() as conn:
-        rows = conn.execute("SELECT id, messages, created_at FROM chats WHERE username=? ORDER BY created_at ASC", (username,)).fetchall()
-        return {row["id"]: json.loads(row["messages"]) for row in rows}
+    return load_json(user_history_file(username))
 
-def save_chat(username, cid, messages):
-    with get_db() as conn:
-        conn.execute("""
-            INSERT INTO chats (id, username, messages, created_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET messages=excluded.messages
-        """, (cid, username, json.dumps(messages, ensure_ascii=False), datetime.datetime.now().isoformat()))
-        conn.commit()
-
-def delete_chat_db(username, cid):
-    with get_db() as conn:
-        conn.execute("DELETE FROM chats WHERE id=? AND username=?", (cid, username))
-        conn.commit()
-
-def clear_all_chats(username):
-    with get_db() as conn:
-        conn.execute("DELETE FROM chats WHERE username=?", (username,))
-        conn.commit()
-
-def update_setting(username, key, value):
-    u = load_user(username)
-    if u:
-        if "settings" not in u: u["settings"] = dict(DEFAULT_SETTINGS)
-        u["settings"][key] = value
-        save_user(u)
+def save_history(username, h):
+    save_json(h, user_history_file(username))
 
 def ask_groq(messages, model):
     r = requests.post("https://api.groq.com/openai/v1/chat/completions",
@@ -463,15 +349,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>{{ t.language }}</label>
-    <div class="seg-group">
-      <button onclick="changeLang('de')" class="{% if user.settings.language == 'de' %}active{% endif %}">🇩🇪 DE</button>
-      <button onclick="changeLang('en')" class="{% if user.settings.language == 'en' %}active{% endif %}">🇬🇧 EN</button>
-    </div>
-  </div>
-
-  <div class="sidebar-section">
-    <label>🎭 {{ t.personality }}</label>
+    <label>🎭 Persönlichkeit</label>
     <select onchange="saveSetting('personality', this.value)">
       {% for p in personalities %}
       <option value="{{ p }}" {% if user.settings.personality == p %}selected{% endif %}>{{ p }}</option>
@@ -480,7 +358,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>{{ t.provider }}</label>
+    <label>🧠 KI Anbieter</label>
     <div class="seg-group">
       {% for prov in providers %}
       <button onclick="changeProvider('{{ prov }}')" class="{% if user.settings.provider == prov %}active{% endif %}">{{ prov }}</button>
@@ -489,7 +367,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>{{ t.model }}</label>
+    <label>🤖 Modell</label>
     <select id="model-sel" onchange="saveSetting('model', this.value)">
       {% for m in providers[user.settings.provider] %}
       <option value="{{ m }}" {% if user.settings.model == m %}selected{% endif %}>{{ m }}</option>
@@ -498,7 +376,7 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <label>{{ t.accent }}</label>
+    <label>🎨 Akzentfarbe</label>
     <div class="color-row">
       {% for name, color in colors.items() %}
       <div class="color-dot {% if user.settings.accent == color %}selected{% endif %}"
@@ -510,13 +388,13 @@ MAIN_HTML = """
   </div>
 
   <div class="sidebar-section">
-    <button class="btn secondary" onclick="newChat()">{{ t.new_chat }}</button>
-    <button class="btn secondary" onclick="exportChat()">{{ t.export }}</button>
-    <button class="btn danger" onclick="clearAll()">{{ t.clear_all }}</button>
+    <button class="btn secondary" onclick="newChat()">➕ Neuer Chat</button>
+    <button class="btn secondary" onclick="exportChat()">📤 Chat exportieren</button>
+    <button class="btn danger" onclick="clearAll()">🗑️ Alles löschen</button>
   </div>
 
   <div class="sidebar-section">
-    <label>{{ t.history }}</label>
+    <label>📜 Chat-Verlauf</label>
   </div>
   <div class="chat-list-wrap">
     <div id="chat-list"></div>
@@ -534,7 +412,7 @@ MAIN_HTML = """
   <div id="chat"></div>
   <div id="variants"></div>
   <div id="input-area">
-    <textarea id="msg-input" placeholder="{{ t.placeholder }}" rows="1"
+    <textarea id="msg-input" placeholder="Schreib Nova etwas..." rows="1"
               onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
     <button id="send-btn" onclick="sendMessage()">🚀</button>
   </div>
@@ -546,19 +424,6 @@ MAIN_HTML = """
   let pendingVariants = [];
   const userAvatar = `{% if user.avatar_type == 'image' %}<img src="{{ user.avatar_data }}">{% else %}{{ user.avatar_data or '🤖' }}{% endif %}`;
   const userName   = "{{ user.displayname }}";
-  const T = {
-    variantsQuestion: "{{ t.variants_question }}",
-    variantShort:     "{{ t.variant_short }}",
-    variantLong:      "{{ t.variant_long }}",
-    confirmClear:     "{{ t.confirm_clear }}",
-    newChatTitle:     "{{ t.new_chat_title }}",
-    errorPrefix:      "{{ t.error_prefix }}",
-  };
-
-  async function changeLang(lang) {
-    await saveSetting('language', lang);
-    window.location.reload();
-  }
 
   window.onload = async () => {
     await loadChatList();
@@ -676,11 +541,11 @@ MAIN_HTML = """
   function showVariants(variants) {
     pendingVariants = variants;
     const div = document.getElementById('variants');
-    div.innerHTML = `<p>${T.variantsQuestion}</p>`;
+    div.innerHTML = `<p>✦ Welche Antwort gefällt dir besser?</p>`;
     variants.forEach((v,i) => {
       const btn = document.createElement('button');
       btn.className = 'variant-btn';
-      btn.textContent = (i===0 ? T.variantShort : T.variantLong) + v.substring(0,80) + (v.length>80?'…':'');
+      btn.textContent = (i===0?'⚡ Kurz: ':'📖 Ausführlich: ') + v.substring(0,80) + (v.length>80?'…':'');
       btn.onclick = () => pickVariant(i);
       div.appendChild(btn);
     });
@@ -725,7 +590,7 @@ MAIN_HTML = """
   }
 
   async function clearAll() {
-    if (!confirm(T.confirmClear)) return;
+    if (!confirm('Wirklich alle deine Chats löschen?')) return;
     await fetch('/clear_all',{method:'POST'});
     newChat();
   }
@@ -764,15 +629,12 @@ COLORS = {
 @app.route("/")
 def index():
     if not get_user(): return redirect("/login")
-    user = load_user(get_user())
-    if not user: return redirect("/login")
-    if "settings" not in user or not user["settings"]: user["settings"] = dict(DEFAULT_SETTINGS)
-    lang = user["settings"].get("language", "de")
-    t    = TRANSLATIONS[lang]
-    personalities = list(PERSONALITIES[lang].keys())
+    users = load_users()
+    user  = users.get(get_user(), {})
+    if "settings" not in user: user["settings"] = dict(DEFAULT_SETTINGS)
     return render_template_string(MAIN_HTML, user=user,
-        personalities=personalities,
-        providers=PROVIDERS, colors=COLORS, t=t)
+        personalities=list(PERSONALITIES.keys()),
+        providers=PROVIDERS, colors=COLORS)
 
 @app.route("/register", methods=["GET","POST"])
 def register():
@@ -783,9 +645,10 @@ def register():
         displayname = request.form.get("displayname","").strip()
         avatar_type = request.form.get("avatar_type","emoji")
         emoji       = request.form.get("emoji","🤖")
+        users = load_users()
         if not username or not password or not displayname:
             error = "Bitte alle Felder ausfüllen!"
-        elif username_exists(username):
+        elif username in users:
             error = "Benutzername bereits vergeben!"
         else:
             avatar_data = emoji
@@ -799,11 +662,12 @@ def register():
                     avatar_type  = "image"
                 else:
                     avatar_type = "emoji"
-            save_user({
+            users[username] = {
                 "username": username, "password": hash_pw(password),
                 "displayname": displayname, "avatar_type": avatar_type,
                 "avatar_data": avatar_data, "settings": dict(DEFAULT_SETTINGS),
-            })
+            }
+            save_users(users)
             session["username"] = username
             return redirect("/")
     return render_template_string(AUTH_HTML, mode="register", title="Registrieren",
@@ -815,7 +679,8 @@ def login():
     if request.method == "POST":
         username = request.form.get("username","").strip().lower()
         password = request.form.get("password","")
-        u = load_user(username)
+        users = load_users()
+        u = users.get(username)
         if not u or u["password"] != hash_pw(password):
             error = "Falscher Benutzername oder Passwort!"
         else:
@@ -833,53 +698,57 @@ def logout():
 def new_chat():
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
+    h   = load_history(u)
     cid = str(datetime.datetime.now().timestamp())
-    save_chat(u, cid, [])
+    h[cid] = []
+    save_history(u, h)
     return jsonify({"chat_id": cid})
 
 @app.route("/load_chat/<cid>")
 def load_chat(cid):
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    with get_db() as conn:
-        row = conn.execute("SELECT messages FROM chats WHERE id=? AND username=?", (cid, u)).fetchone()
-    messages = json.loads(row["messages"]) if row else []
-    return jsonify({"messages": messages})
+    h = load_history(u)
+    return jsonify({"messages": h.get(cid, [])})
 
 @app.route("/chat_list")
 def chat_list():
     u = get_user()
     if not u: return jsonify({"chats":[]})
-    with get_db() as conn:
-        rows = conn.execute("SELECT id, messages FROM chats WHERE username=? ORDER BY created_at DESC", (u,)).fetchall()
+    h = load_history(u)
     chats = []
-    for row in rows:
-        msgs  = json.loads(row["messages"])
+    for cid in reversed(list(h.keys())):
+        msgs  = h[cid]
         first = msgs[0].get("msg","Neuer Chat") if msgs else "Neuer Chat"
         title = (first[:16]+"…") if len(first)>16 else first
-        chats.append({"id":row["id"],"title":title})
+        chats.append({"id":cid,"title":title})
     return jsonify({"chats":chats})
 
 @app.route("/delete_chat/<cid>", methods=["DELETE"])
 def delete_chat(cid):
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    delete_chat_db(u, cid)
+    h = load_history(u)
+    if cid in h: del h[cid]; save_history(u,h)
     return jsonify({"ok":True})
 
 @app.route("/clear_all", methods=["POST"])
 def clear_all():
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    clear_all_chats(u)
+    save_history(u,{})
     return jsonify({"ok":True})
 
 @app.route("/save_setting", methods=["POST"])
 def save_setting():
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    data = request.json
-    update_setting(u, data["key"], data["value"])
+    users = load_users()
+    data  = request.json
+    if u in users:
+        if "settings" not in users[u]: users[u]["settings"] = dict(DEFAULT_SETTINGS)
+        users[u]["settings"][data["key"]] = data["value"]
+        save_users(users)
     return jsonify({"ok":True})
 
 @app.route("/models/<provider>")
@@ -904,40 +773,33 @@ def send():
     data     = request.json
     user_msg = data.get("message","")
     chat_id  = data.get("chat_id","")
-    user_obj = load_user(u)
-    s        = user_obj.get("settings", dict(DEFAULT_SETTINGS)) if user_obj else dict(DEFAULT_SETTINGS)
-    # Chat laden
-    with get_db() as conn:
-        row = conn.execute("SELECT messages FROM chats WHERE id=? AND username=?", (chat_id, u)).fetchone()
-    msgs_list = json.loads(row["messages"]) if row else []
-    msgs_list.append({"sender":"Du","msg":user_msg})
-    save_chat(u, chat_id, msgs_list)
+    users    = load_users()
+    s        = users.get(u,{}).get("settings", dict(DEFAULT_SETTINGS))
+    h        = load_history(u)
+    if chat_id not in h: h[chat_id] = []
+    h[chat_id].append({"sender":"Du","msg":user_msg})
+    save_history(u,h)
     persona  = s.get("personality","🤖 Standard")
-    lang     = s.get("language","de")
-    system   = PERSONALITIES[lang].get(persona, list(PERSONALITIES[lang].values())[0])
+    system   = PERSONALITIES.get(persona, PERSONALITIES["🤖 Standard"])
     provider = s.get("provider","Groq")
     model    = s.get("model","llama-3.3-70b-versatile")
     hist = [
         {"role":"user" if m["sender"]=="Du" else "assistant","content":m["msg"]}
-        for m in msgs_list[:-1][-10:]
+        for m in h[chat_id][:-1][-10:]
     ]
     try:
         if random.random() < 0.4:
             variants = []
-            styles = {
-                "de": ["kurz und direkt", "ausführlicher und erklärend"],
-                "en": ["short and direct", "more detailed and explanatory"],
-            }
-            for style in styles.get(lang, styles["de"]):
+            for style in ["kurz und direkt","ausführlicher und erklärend"]:
                 sys_v = system + f"\n\nAntworte jetzt {style}."
-                api_msgs = [{"role":"system","content":sys_v},*hist,{"role":"user","content":user_msg}]
-                variants.append(ask_model(api_msgs,provider,model))
+                msgs  = [{"role":"system","content":sys_v},*hist,{"role":"user","content":user_msg}]
+                variants.append(ask_model(msgs,provider,model))
             return jsonify({"variants":variants})
         else:
-            api_msgs = [{"role":"system","content":system},*hist,{"role":"user","content":user_msg}]
-            res  = ask_model(api_msgs,provider,model)
-            msgs_list.append({"sender":"Nova","msg":res})
-            save_chat(u, chat_id, msgs_list)
+            msgs = [{"role":"system","content":system},*hist,{"role":"user","content":user_msg}]
+            res  = ask_model(msgs,provider,model)
+            h[chat_id].append({"sender":"Nova","msg":res})
+            save_history(u,h)
             return jsonify({"response":res})
     except Exception as e:
         return jsonify({"response":f"⚠️ Fehler: {e}"})
@@ -949,12 +811,10 @@ def pick_variant():
     data    = request.json
     chat_id = data.get("chat_id","")
     chosen  = data.get("chosen","")
-    with get_db() as conn:
-        row = conn.execute("SELECT messages FROM chats WHERE id=? AND username=?", (chat_id, u)).fetchone()
-    if row:
-        msgs_list = json.loads(row["messages"])
-        msgs_list.append({"sender":"Nova","msg":chosen})
-        save_chat(u, chat_id, msgs_list)
+    h       = load_history(u)
+    if chat_id in h:
+        h[chat_id].append({"sender":"Nova","msg":chosen})
+        save_history(u,h)
     return jsonify({"ok":True})
 
 if __name__ == "__main__":
