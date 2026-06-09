@@ -1,31 +1,61 @@
 # ==============================================================================
-# NOVA AI - Web Version 2.0 (Login + Profile + getrennte Chats)
+# NOVA AI - Web Version 2.0 (Login + Profile + getrennte Chats + SQLite)
 # ==============================================================================
 
 from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
-import json, os, datetime, platform, random, requests, uuid, hashlib, base64
+import json, os, datetime, platform, random, requests, uuid, hashlib, base64, sqlite3
 
 # ------------------------------------------------------------------------------
 # !! API KEYS HIER EINTRAGEN !!
 # ------------------------------------------------------------------------------
-GROQ_API_KEY   = "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"
-OPENAI_API_KEY = "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"
+GROQ_API_KEY   = "dein-groq-key-hier"
+OPENAI_API_KEY = "dein-openai-key-hier"
 # ------------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.secret_key = "nova-super-secret-2024"
+app.secret_key = os.environ.get("SECRET_KEY", "nova-super-secret-2024-xK9mP3")
 
-def get_data_dir():
+# Datenbank-Pfad – auf Railway unter /data, lokal im Home-Verzeichnis
+def get_db_path():
+    if os.path.exists("/data"):
+        return "/data/nova.db"
     if platform.system() == "Darwin":
         d = os.path.expanduser("~/Library/Application Support/NOVA_AI")
     else:
         d = os.path.join(os.path.expanduser("~"), ".nova_ai")
     os.makedirs(d, exist_ok=True)
-    return d
+    return os.path.join(d, "nova.db")
 
-BASE_DIR      = get_data_dir()
-USERS_FILE    = os.path.join(BASE_DIR, "nova_users.json")
-SETTINGS_FILE = os.path.join(BASE_DIR, "nova_web_settings.json")
+DB_PATH = get_db_path()
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                displayname TEXT NOT NULL,
+                avatar_type TEXT DEFAULT 'emoji',
+                avatar_data TEXT DEFAULT '🤖',
+                settings TEXT DEFAULT '{}'
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chats (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                messages TEXT DEFAULT '[]',
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+init_db()
 
 PROVIDERS = {
     "Groq":   ["llama-3.3-70b-versatile","llama-3.1-8b-instant","mixtral-8x7b-32768","gemma2-9b-it"],
@@ -97,37 +127,70 @@ EMOJIS = ["😀","😎","🤖","🦊","🐱","🐶","🦁","🐼","🐸","🦄",
 
 DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0","language":"de"}
 
-def load_json(f):
-    if os.path.exists(f):
-        try:
-            with open(f,"r",encoding="utf-8") as file: return json.load(file)
-        except: pass
-    return {}
-
-def save_json(data, f):
-    with open(f,"w",encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def load_users():
-    return load_json(USERS_FILE)
+def load_user(username):
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if not row: return None
+        u = dict(row)
+        u["settings"] = json.loads(u["settings"] or "{}")
+        if not u["settings"]: u["settings"] = dict(DEFAULT_SETTINGS)
+        return u
 
-def save_users(u):
-    save_json(u, USERS_FILE)
+def save_user(u):
+    s = json.dumps(u.get("settings", {}), ensure_ascii=False)
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO users (username, password, displayname, avatar_type, avatar_data, settings)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                password=excluded.password,
+                displayname=excluded.displayname,
+                avatar_type=excluded.avatar_type,
+                avatar_data=excluded.avatar_data,
+                settings=excluded.settings
+        """, (u["username"], u["password"], u["displayname"], u["avatar_type"], u["avatar_data"], s))
+        conn.commit()
+
+def username_exists(username):
+    with get_db() as conn:
+        return conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone() is not None
 
 def get_user():
     return session.get("username")
 
-def user_history_file(username):
-    return os.path.join(BASE_DIR, f"nova_history_{username}.json")
-
 def load_history(username):
-    return load_json(user_history_file(username))
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, messages, created_at FROM chats WHERE username=? ORDER BY created_at ASC", (username,)).fetchall()
+        return {row["id"]: json.loads(row["messages"]) for row in rows}
 
-def save_history(username, h):
-    save_json(h, user_history_file(username))
+def save_chat(username, cid, messages):
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO chats (id, username, messages, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET messages=excluded.messages
+        """, (cid, username, json.dumps(messages, ensure_ascii=False), datetime.datetime.now().isoformat()))
+        conn.commit()
+
+def delete_chat_db(username, cid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM chats WHERE id=? AND username=?", (cid, username))
+        conn.commit()
+
+def clear_all_chats(username):
+    with get_db() as conn:
+        conn.execute("DELETE FROM chats WHERE username=?", (username,))
+        conn.commit()
+
+def update_setting(username, key, value):
+    u = load_user(username)
+    if u:
+        if "settings" not in u: u["settings"] = dict(DEFAULT_SETTINGS)
+        u["settings"][key] = value
+        save_user(u)
 
 def ask_groq(messages, model):
     r = requests.post("https://api.groq.com/openai/v1/chat/completions",
@@ -701,9 +764,9 @@ COLORS = {
 @app.route("/")
 def index():
     if not get_user(): return redirect("/login")
-    users = load_users()
-    user  = users.get(get_user(), {})
-    if "settings" not in user: user["settings"] = dict(DEFAULT_SETTINGS)
+    user = load_user(get_user())
+    if not user: return redirect("/login")
+    if "settings" not in user or not user["settings"]: user["settings"] = dict(DEFAULT_SETTINGS)
     lang = user["settings"].get("language", "de")
     t    = TRANSLATIONS[lang]
     personalities = list(PERSONALITIES[lang].keys())
@@ -720,10 +783,9 @@ def register():
         displayname = request.form.get("displayname","").strip()
         avatar_type = request.form.get("avatar_type","emoji")
         emoji       = request.form.get("emoji","🤖")
-        users = load_users()
         if not username or not password or not displayname:
             error = "Bitte alle Felder ausfüllen!"
-        elif username in users:
+        elif username_exists(username):
             error = "Benutzername bereits vergeben!"
         else:
             avatar_data = emoji
@@ -737,12 +799,11 @@ def register():
                     avatar_type  = "image"
                 else:
                     avatar_type = "emoji"
-            users[username] = {
+            save_user({
                 "username": username, "password": hash_pw(password),
                 "displayname": displayname, "avatar_type": avatar_type,
                 "avatar_data": avatar_data, "settings": dict(DEFAULT_SETTINGS),
-            }
-            save_users(users)
+            })
             session["username"] = username
             return redirect("/")
     return render_template_string(AUTH_HTML, mode="register", title="Registrieren",
@@ -754,8 +815,7 @@ def login():
     if request.method == "POST":
         username = request.form.get("username","").strip().lower()
         password = request.form.get("password","")
-        users = load_users()
-        u = users.get(username)
+        u = load_user(username)
         if not u or u["password"] != hash_pw(password):
             error = "Falscher Benutzername oder Passwort!"
         else:
@@ -773,57 +833,53 @@ def logout():
 def new_chat():
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    h   = load_history(u)
     cid = str(datetime.datetime.now().timestamp())
-    h[cid] = []
-    save_history(u, h)
+    save_chat(u, cid, [])
     return jsonify({"chat_id": cid})
 
 @app.route("/load_chat/<cid>")
 def load_chat(cid):
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    h = load_history(u)
-    return jsonify({"messages": h.get(cid, [])})
+    with get_db() as conn:
+        row = conn.execute("SELECT messages FROM chats WHERE id=? AND username=?", (cid, u)).fetchone()
+    messages = json.loads(row["messages"]) if row else []
+    return jsonify({"messages": messages})
 
 @app.route("/chat_list")
 def chat_list():
     u = get_user()
     if not u: return jsonify({"chats":[]})
-    h = load_history(u)
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, messages FROM chats WHERE username=? ORDER BY created_at DESC", (u,)).fetchall()
     chats = []
-    for cid in reversed(list(h.keys())):
-        msgs  = h[cid]
+    for row in rows:
+        msgs  = json.loads(row["messages"])
         first = msgs[0].get("msg","Neuer Chat") if msgs else "Neuer Chat"
         title = (first[:16]+"…") if len(first)>16 else first
-        chats.append({"id":cid,"title":title})
+        chats.append({"id":row["id"],"title":title})
     return jsonify({"chats":chats})
 
 @app.route("/delete_chat/<cid>", methods=["DELETE"])
 def delete_chat(cid):
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    h = load_history(u)
-    if cid in h: del h[cid]; save_history(u,h)
+    delete_chat_db(u, cid)
     return jsonify({"ok":True})
 
 @app.route("/clear_all", methods=["POST"])
 def clear_all():
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    save_history(u,{})
+    clear_all_chats(u)
     return jsonify({"ok":True})
 
 @app.route("/save_setting", methods=["POST"])
 def save_setting():
     u = get_user()
     if not u: return jsonify({"error":"not logged in"}), 401
-    users = load_users()
-    data  = request.json
-    if u in users:
-        if "settings" not in users[u]: users[u]["settings"] = dict(DEFAULT_SETTINGS)
-        users[u]["settings"][data["key"]] = data["value"]
-        save_users(users)
+    data = request.json
+    update_setting(u, data["key"], data["value"])
     return jsonify({"ok":True})
 
 @app.route("/models/<provider>")
@@ -848,12 +904,14 @@ def send():
     data     = request.json
     user_msg = data.get("message","")
     chat_id  = data.get("chat_id","")
-    users    = load_users()
-    s        = users.get(u,{}).get("settings", dict(DEFAULT_SETTINGS))
-    h        = load_history(u)
-    if chat_id not in h: h[chat_id] = []
-    h[chat_id].append({"sender":"Du","msg":user_msg})
-    save_history(u,h)
+    user_obj = load_user(u)
+    s        = user_obj.get("settings", dict(DEFAULT_SETTINGS)) if user_obj else dict(DEFAULT_SETTINGS)
+    # Chat laden
+    with get_db() as conn:
+        row = conn.execute("SELECT messages FROM chats WHERE id=? AND username=?", (chat_id, u)).fetchone()
+    msgs_list = json.loads(row["messages"]) if row else []
+    msgs_list.append({"sender":"Du","msg":user_msg})
+    save_chat(u, chat_id, msgs_list)
     persona  = s.get("personality","🤖 Standard")
     lang     = s.get("language","de")
     system   = PERSONALITIES[lang].get(persona, list(PERSONALITIES[lang].values())[0])
@@ -861,7 +919,7 @@ def send():
     model    = s.get("model","llama-3.3-70b-versatile")
     hist = [
         {"role":"user" if m["sender"]=="Du" else "assistant","content":m["msg"]}
-        for m in h[chat_id][:-1][-10:]
+        for m in msgs_list[:-1][-10:]
     ]
     try:
         if random.random() < 0.4:
@@ -872,14 +930,14 @@ def send():
             }
             for style in styles.get(lang, styles["de"]):
                 sys_v = system + f"\n\nAntworte jetzt {style}."
-                msgs  = [{"role":"system","content":sys_v},*hist,{"role":"user","content":user_msg}]
-                variants.append(ask_model(msgs,provider,model))
+                api_msgs = [{"role":"system","content":sys_v},*hist,{"role":"user","content":user_msg}]
+                variants.append(ask_model(api_msgs,provider,model))
             return jsonify({"variants":variants})
         else:
-            msgs = [{"role":"system","content":system},*hist,{"role":"user","content":user_msg}]
-            res  = ask_model(msgs,provider,model)
-            h[chat_id].append({"sender":"Nova","msg":res})
-            save_history(u,h)
+            api_msgs = [{"role":"system","content":system},*hist,{"role":"user","content":user_msg}]
+            res  = ask_model(api_msgs,provider,model)
+            msgs_list.append({"sender":"Nova","msg":res})
+            save_chat(u, chat_id, msgs_list)
             return jsonify({"response":res})
     except Exception as e:
         return jsonify({"response":f"⚠️ Fehler: {e}"})
@@ -891,10 +949,12 @@ def pick_variant():
     data    = request.json
     chat_id = data.get("chat_id","")
     chosen  = data.get("chosen","")
-    h       = load_history(u)
-    if chat_id in h:
-        h[chat_id].append({"sender":"Nova","msg":chosen})
-        save_history(u,h)
+    with get_db() as conn:
+        row = conn.execute("SELECT messages FROM chats WHERE id=? AND username=?", (chat_id, u)).fetchone()
+    if row:
+        msgs_list = json.loads(row["messages"])
+        msgs_list.append({"sender":"Nova","msg":chosen})
+        save_chat(u, chat_id, msgs_list)
     return jsonify({"ok":True})
 
 if __name__ == "__main__":
