@@ -44,7 +44,7 @@ PERSONALITIES = {
 
 EMOJIS = ["😀","😎","🤖","🦊","🐱","🐶","🦁","🐼","🐸","🦄","🐙","🦋","🌟","🔥","⚡","🎭","🎨","🎮","🚀","🌈"]
 
-‚DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0"}
+DEFAULT_SETTINGS = {"personality":"🤖 Standard","provider":"Groq","model":"llama-3.3-70b-versatile","accent":"#3B8ED0"}
 
 def load_json(f):
     if os.path.exists(f):
